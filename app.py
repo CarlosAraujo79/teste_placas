@@ -1,30 +1,19 @@
 import streamlit as st
-import os
 import cv2
 import pytesseract
-import matplotlib.pyplot as plt
 from ultralytics import YOLO
-from PIL import Image
 import numpy as np
-
-# Função para verificar as extensões permitidas
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+from PIL import Image
 
 # Carregar o modelo
 model = YOLO('best_license_plate_model.pt')
 
-def process_image(image):
-    # Converter a imagem do PIL para formato que o OpenCV pode manipular
-    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+def process_frame(frame):
+    # Converter o frame para formato que o OpenCV pode manipular
+    image_cv = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Realizar a predição na imagem
+    # Realizar a predição no frame
     results = model.predict(image_cv, device='cpu')
-
-    # Converter a imagem de volta para RGB para exibição no Streamlit
-    image_rgb = cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB)
 
     detected_texts = []
 
@@ -32,31 +21,46 @@ def process_image(image):
         for box in result.boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             confidence = box.conf[0]
-            cv2.rectangle(image_rgb, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(image_rgb, f'{confidence*100:.2f}%', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
-            roi = image_rgb[y1:y2, x1:x2]
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f'{confidence*100:.2f}%', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+            roi = frame[y1:y2, x1:x2]
             text = pytesseract.image_to_string(roi, config='--psm 6')
             detected_texts.append((text, confidence))
 
-    return image_rgb, detected_texts
+    return frame, detected_texts
 
 # Interface do Streamlit
-st.title("Detecção de Placas de Carro")
+st.title("Detecção de Placas de Carro em Vídeo ao Vivo")
 
-uploaded_file = st.file_uploader("Escolha uma imagem", type=["png", "jpg", "jpeg", "gif"])
+# Inicializar a webcam
+cap = cv2.VideoCapture(0)
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file)
+if not cap.isOpened():
+    st.error("Erro ao acessar a webcam")
+else:
+    stframe = st.empty()
 
-    st.image(image, caption='Imagem carregada', use_column_width=True)
-    st.write("Processando...")
+    while True:
+        ret, frame = cap.read()
 
-    processed_image, detected_texts = process_image(image)
+        if not ret:
+            st.error("Erro ao capturar o frame")
+            break
 
-    st.image(processed_image, caption='Imagem Processada', use_column_width=True)
+        # Processar o frame
+        processed_frame, detected_texts = process_frame(frame)
 
-    st.write("Textos Detectados:")
-    for text, confidence in detected_texts:
-        st.write(f"**Texto:** {text}")
-        st.write(f"**Confiança:** {confidence*100:.2f}%")
+        # Converter o frame para RGB para exibição no Streamlit
+        processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
 
+        # Exibir o frame no Streamlit
+        stframe.image(processed_frame_rgb, use_column_width=True)
+
+        # Exibir textos detectados
+        st.write("Textos Detectados:")
+        for text, confidence in detected_texts:
+            st.write(f"**Texto:** {text}")
+            st.write(f"**Confiança:** {confidence*100:.2f}%")
+
+    cap.release()
+    cv2.destroyAllWindows()
